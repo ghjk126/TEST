@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>555定时器电路模拟器（原图版）</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .panel {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .control-panel {
+            flex: 1;
+            min-width: 300px;
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .circuit-panel {
+            flex: 2;
+            min-width: 400px;
+            background-color: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="range"] {
+            width: 100%;
+            margin: 10px 0;
+        }
+        .value-display {
+            font-weight: bold;
+            color: #2980b9;
+        }
+        canvas {
+            width: 100%;
+            height: 300px;
+            margin-top: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .audio-controls {
+            text-align: center;
+            margin: 15px 0;
+        }
+        .circuit-image {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>555定时器电路模拟器（原图版）</h1>
+        
+        <div class="panel">
+            <div class="control-panel">
+                <h3>电路控制</h3>
+                <label>电位器阻值: <span id="potValue" class="value-display">50</span>kΩ</label>
+                <input type="range" id="potentiometer" min="0" max="100" value="50">
+                
+                <div style="margin-top: 20px;">
+                    <div>输出频率: <span id="frequency" class="value-display">0</span> Hz</div>
+                    <div>占空比: <span id="dutyCycle" class="value-display">≈50%</span></div>
+                    <div>时间常数: <span id="timeConstant" class="value-display">0</span> ms</div>
+                </div>
+                
+                <div class="audio-controls">
+                    <button id="playButton">播放声音</button>
+                    <button id="stopButton" disabled>停止播放</button>
+                </div>
+            </div>
+            
+            <div class="circuit-panel">
+                <h3>原始电路图</h3>
+                <img src="https://i.postimg.cc/MKMCtHRg/Screenshot-2025-06-20-131224.png" class="circuit-image" alt="555定时器电路图">
+                <p style="font-size:12px; color:#666;">注：此为原始电路图，交互功能仍正常工作</p>
+            </div>
+        </div>
+        
+        <canvas id="waveformChart"></canvas>
+    </div>
+
+    <script>
+        // 音频相关变量
+        let oscillator = null;
+        let isPlaying = false;
+        let potValue = 50;
+        
+        // 更新电路参数
+        function updateCircuit() {
+            calculateFrequency(potValue);
+        }
+        
+        // 精确频率计算公式（根据电路参数）
+        function calculateFrequency(potValue) {
+            const R1 = potValue * 1000;  // 电位器阻值(Ω)
+            const R2 = 5100;  // 5.1kΩ
+            const R3 = 4550;  // 4.55kΩ
+            const C1 = 0.1e-6; // 0.1μF
+            
+            // 555无稳态模式精确公式
+            const frequency = 1.44 / ((R1 + R2 + R3) * C1);
+            const dutyCycle = ((R1 + R2) / (R1 + R2 + R3) * 100).toFixed(1);
+            const timeConstant = ((R1 + R2 + R3) * C1 * 1000).toFixed(2);
+            
+            // 更新显示
+            document.getElementById("frequency").textContent = frequency.toFixed(2);
+            document.getElementById("dutyCycle").textContent = `${dutyCycle}%`;
+            document.getElementById("timeConstant").textContent = timeConstant;
+            document.getElementById("potValue").textContent = potValue;
+            
+            // 更新波形图
+            updateWaveformChart(frequency, dutyCycle);
+            
+            // 更新音频
+            if (isPlaying && oscillator) {
+                oscillator.frequency.value = frequency;
+            }
+            
+            return frequency;
+        }
+        
+        // 更新波形图
+        function updateWaveformChart(frequency, dutyCycle) {
+            const period = 1 / frequency * 1000; // 周期(ms)
+            const highTime = period * dutyCycle / 100;
+            const lowTime = period - highTime;
+            const points = [];
+            
+            // 生成3个周期的波形数据
+            for (let t = 0; t < 3 * period; t += period / 50) {
+                const cyclePos = t % period;
+                points.push({
+                    x: t,
+                    y: cyclePos < highTime ? 5 : 0
+                });
+            }
+            
+            const ctx = document.getElementById('waveformChart').getContext('2d');
+            if (window.myChart) window.myChart.destroy();
+            
+            window.myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: '555输出波形',
+                        data: points,
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom',
+                            title: { display: true, text: '时间 (ms)' }
+                        },
+                        y: {
+                            min: -0.5,
+                            max: 5.5,
+                            title: { display: true, text: '电压 (V)' },
+                            ticks: {
+                                callback: function(value) {
+                                    if (value === 0) return '0V';
+                                    if (value === 5) return '5V';
+                                    return '';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 音频控制
+        function initAudio() {
+            if (!window.Tone) {
+                console.warn("Tone.js未加载，音频功能不可用");
+                document.getElementById('playButton').disabled = true;
+                return;
+            }
+        }
+        
+        function playAudio() {
+            if (!window.Tone || isPlaying) return;
+            
+            if (Tone.context.state !== 'running') {
+                Tone.context.resume();
+            }
+            
+            const frequency = parseFloat(document.getElementById("frequency").textContent);
+            oscillator = new Tone.Oscillator(frequency, "square").toDestination();
+            oscillator.start();
+            
+            isPlaying = true;
+            document.getElementById("playButton").disabled = true;
+            document.getElementById("stopButton").disabled = false;
+        }
+        
+        function stopAudio() {
+            if (!isPlaying || !oscillator) return;
+            
+            oscillator.stop();
+            oscillator = null;
+            isPlaying = false;
+            document.getElementById("playButton").disabled = false;
+            document.getElementById("stopButton").disabled = true;
+        }
+        
+        // 初始化
+        document.getElementById("potentiometer").addEventListener("input", function() {
+            potValue = this.value;
+            updateCircuit();
+        });
+        
+        document.getElementById("playButton").addEventListener("click", playAudio);
+        document.getElementById("stopButton").addEventListener("click", stopAudio);
+        
+        window.addEventListener('beforeunload', function() {
+            if (isPlaying && oscillator) {
+                oscillator.stop();
+            }
+        });
+        
+        initAudio();
+        calculateFrequency(potValue);
+    </script>
+</body>
+</html>
